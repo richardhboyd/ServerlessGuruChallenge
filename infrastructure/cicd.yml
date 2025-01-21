@@ -32,10 +32,25 @@ Resources:
               - sts:AssumeRole
       Path: /
 
-  BuildProjectPolicy:
+  BuildProjectDevRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-CodeBuildDevRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  BuildProjectDevPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub ${ProjectName}-CodeBuildPolicy
+      PolicyName: !Sub ${ProjectName}-CodeBuildDevPolicy
       PolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -60,6 +75,31 @@ Resources:
               - '*'
             Resource: '*'
       Roles:
+        - !Ref BuildProjectDevRole
+
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-CodeBuildPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}/*
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+      Roles:
         - !Ref BuildProjectRole
 
   DevDeployBuildProject:
@@ -67,7 +107,7 @@ Resources:
     Properties:
       Name: DevDeployAction
       Description: !Ref ProjectName
-      ServiceRole: !GetAtt BuildProjectRole.Arn
+      ServiceRole: !GetAtt BuildProjectDevRole.Arn
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -83,7 +123,7 @@ Resources:
             Value: !GetAtt ServerlessFrameworkAccessKey.Id
       Source:
         Type: CODEPIPELINE
-        BuildSpec: build_spec_dev_deploy.yml
+        BuildSpec: infrastructure/build_spec_dev_deploy.yml
       TimeoutInMinutes: 10
 
   BuildProject:
@@ -104,22 +144,7 @@ Resources:
             Value: !Ref S3Bucket
       Source:
         Type: CODEPIPELINE
-        BuildSpec: |
-          version: 0.2
-          phases:
-            install:
-              runtime-versions:
-                python: 3.7
-              commands:
-                - ls -R
-            build:
-              commands:
-                - echo "here"
-                - touch ./output.yaml
-          artifacts:
-            files:
-              - ./output.yaml
-            discard-paths: yes
+        BuildSpec: infrastructure/build_spec_ci.yml
       TimeoutInMinutes: 10
 
   PipeLineRole:
@@ -244,7 +269,7 @@ Resources:
               Configuration:
                 BranchName: main
                 ConnectionArn: arn:aws:codeconnections:us-east-1:209479286891:connection/6c6c595e-418b-439d-b1eb-825db436ca12
-                FullRepositoryId: "richardhboyd/ServerlessGuruChallenge"
+                FullRepositoryId: richardhboyd/ServerlessGuruChallenge
                 DetectChanges: true
               RunOrder: 1
         - Name: Beta
@@ -282,9 +307,12 @@ Resources:
               - Branches:
                   Includes:
                     - main
+              - Files:
+                  Includes:
+                    - '*'
             SourceActionName: SourceAction
       PipelineType: V2
-      ExecutionMode: PARALLEL
+      ExecutionMode: SUPERSEDED
       ArtifactStore:
         Type: S3
         Location: !Ref S3Bucket
