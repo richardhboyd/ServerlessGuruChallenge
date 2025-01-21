@@ -11,6 +11,12 @@ Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
 
+  ServerlessFrameworkAccessKey:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: AccessKeyForServerlessFramework
+      SecretString: 'some_dummy_value'
+
   BuildProjectRole:
     Type: AWS::IAM::Role
     Properties:
@@ -48,6 +54,11 @@ Resources:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource: arn:aws:logs:*:*:*
+            # TODO: Remove
+          - Effect: Allow
+            Action:
+              - '*'
+            Resource: '*'
       Roles:
         - !Ref BuildProjectRole
 
@@ -62,11 +73,14 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:6.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: S3Bucket
             Value: !Ref S3Bucket
+          - Name: SERVERLESS_ACCESS_KEY
+            Type: SECRETS_MANAGER
+            Value: !GetAtt ServerlessFrameworkAccessKey.Id
       Source:
         Type: CODEPIPELINE
         BuildSpec: build_spec_dev_deploy.yml
@@ -83,7 +97,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:6.0
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: S3Bucket
