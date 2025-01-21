@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Our Pipeline Stack
+
+Parameters:
+  ProjectName:
+    Description: Name of the Project
+    Type: String
+    Default: "MyDevOpsProject"
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+
+  BuildProjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-CodeBuildRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-CodeBuildPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}/*
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+      Roles:
+        - !Ref BuildProjectRole
+
+  DevDeployBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: DevDeployAction
+      Description: !Ref ProjectName
+      ServiceRole: !GetAtt BuildProjectRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: S3Bucket
+            Value: !Ref S3Bucket
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: build_spec_dev_deploy.yml
+      TimeoutInMinutes: 10
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref ProjectName
+      Description: !Ref ProjectName
+      ServiceRole: !GetAtt BuildProjectRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: S3Bucket
+            Value: !Ref S3Bucket
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - ls -R
+            build:
+              commands:
+                - echo "here"
+                - touch ./output.yaml
+          artifacts:
+            files:
+              - ./output.yaml
+            discard-paths: yes
+      TimeoutInMinutes: 10
+
+  PipeLineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-codepipeline-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  PipelinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-codepipeline-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - 
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:Describe*
+              - cloudformation:UpdateStack
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:ExecuteChangeSet
+            Resource:
+              - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*
+              - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*
+          - 
+            Effect: Allow
+            Action:
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+             - !Sub '${S3Bucket.Arn}/*'
+             - !Sub '${S3Bucket.Arn}'
+          - 
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+             - !GetAtt CFDeployerRole.Arn
+          - 
+            Effect: Allow
+            Action:
+              - codebuild:StartBuild
+              - codebuild:BatchGetBuilds
+            Resource:
+             - !GetAtt BuildProject.Arn
+             - !GetAtt DevDeployBuildProject.Arn
+          - 
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}/*
+             - !Sub arn:${AWS::Partition}:s3:::${S3Bucket}
+          - 
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource:
+              - !GetAtt PipeLineRole.Arn
+          - 
+            Effect: Allow
+            Action:
+              - codestar-connections:*
+              - codeconnections:*
+            Resource:
+              - arn:aws:codeconnections:us-east-1:209479286891:connection/6c6c595e-418b-439d-b1eb-825db436ca12
+      Roles:
+        - !Ref PipeLineRole
+
+  CFDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cloudformationdeployer-role
+      ManagedPolicyArns:
+        -  arn:aws:iam::aws:policy/AdministratorAccess
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  CodePipelineForIntegTest:
+    Type: 'AWS::CodePipeline::Pipeline'
+    DependsOn:
+      - PipelinePolicy
+    Properties:
+      RoleArn: !GetAtt PipeLineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              InputArtifacts: []
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: main
+                ConnectionArn: arn:aws:codeconnections:us-east-1:209479286891:connection/6c6c595e-418b-439d-b1eb-825db436ca12
+                FullRepositoryId: "richardhboyd/ServerlessGuruChallenge"
+                DetectChanges: true
+              RunOrder: 1
+        - Name: Beta
+          Actions:
+            - Name: BetaAction
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+              RunOrder: 1
+        - Name: Dev
+          Actions:
+            - Name: DevDeployAction
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref DevDeployBuildProject
+              RunOrder: 1
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            Push:
+              - Branches:
+                  Includes:
+                    - main
+            SourceActionName: SourceAction
+      PipelineType: V2
+      ExecutionMode: PARALLEL
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3Bucket

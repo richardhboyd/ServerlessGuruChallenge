@@ -1,0 +1,80 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: richardhboydtest
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: crud
+service: serverless-http-api-dynamodb
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  lambdaHashingVersion: '20201221'
+  environment:
+    DYNAMODB_TABLE: ${self:service}-${sls:stage}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+
+functions:
+  create:
+    handler: widget/create.create
+    events:
+      - http:
+          path: widget
+          method: post
+          cors: true
+          request:
+            schemas:
+              application/json:
+                schema: ${file(./schemas/create_widget.json)}
+                name: CreateWidgetModel
+                description: 'Validation model for creating Widgets'
+
+  read:
+    handler: widget/read.read
+    events:
+      - http:
+          path: widget/{id}
+          method: get
+          cors: true
+
+  update:
+    handler: widget/update.update
+    events:
+      - http:
+          path: widget/{id}
+          method: put
+          cors: true
+
+  delete:
+    handler: widget/delete.delete
+    events:
+      - http:
+          path: widget/{id}
+          method: delete
+          cors: true
+
+resources:
+  Resources:
+    WidgetsDynamoDbTable:
+      Type: 'AWS::DynamoDB::Table'
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: id
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.DYNAMODB_TABLE}

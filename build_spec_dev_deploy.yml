@@ -1,0 +1,14 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - npm i serverless -g
+      - echo "hello"
+  build:
+    commands:
+      - serverless deploy 
+cache:
+  paths:
+    - node-modules
